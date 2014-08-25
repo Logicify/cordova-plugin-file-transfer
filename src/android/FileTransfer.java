@@ -23,6 +23,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -534,8 +535,8 @@ public class FileTransfer extends CordovaPlugin {
     };
     // Create a trust manager that does not validate certificate chains
     private static final TrustManager[] trustAllCerts = new TrustManager[] { new X509TrustManager() {
-        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-            return new java.security.cert.X509Certificate[] {};
+        public X509Certificate[] getAcceptedIssuers() {
+            return new X509Certificate[] {};
         }
         
         public void checkClientTrusted(X509Certificate[] chain,
@@ -714,6 +715,8 @@ public class FileTransfer extends CordovaPlugin {
                 PluginResult result = null;
                 TrackingInputStream inputStream = null;
                 boolean cached = false;
+                boolean append = false;
+                long continueFrom = 0;
 
                 OutputStream outputStream = null;
                 try {
@@ -763,6 +766,20 @@ public class FileTransfer extends CordovaPlugin {
                         if (headers != null) {
                             addHeadersToRequest(connection, headers);
                         }
+
+                        //check if local file already exist
+
+                        if(resourceApi.getUriType(targetUri) == CordovaResourceApi.URI_TYPE_FILE){
+                            File localFile = new File(targetUri.getPath());
+                            if(localFile.exists() && localFile.length() > 0){
+                                continueFrom = localFile.length();
+                                append = true;
+                                connection.addRequestProperty("Range", "bytes=" + String.valueOf(continueFrom) + "-");
+                                Log.d(LOG_TAG, "Local file found, continue from " + String.valueOf(continueFrom));
+                            } else {
+                                Log.d(LOG_TAG, "Local file not found, proceeding as usual");
+                            }
+                        }
         
                         connection.connect();
                         if (connection.getResponseCode() == HttpURLConnection.HTTP_NOT_MODIFIED) {
@@ -796,7 +813,18 @@ public class FileTransfer extends CordovaPlugin {
                             // write bytes to file
                             byte[] buffer = new byte[MAX_BUFFER_SIZE];
                             int bytesRead = 0;
-                            outputStream = resourceApi.openOutputStream(targetUri);
+                            outputStream = resourceApi.openOutputStream(targetUri, append);
+/*                            long filesize = 0;
+                            if(outputStream instanceof FileOutputStream){
+                                FileOutputStream fs = (FileOutputStream) outputStream;
+                                filesize = fs.getChannel().size();
+                            }
+
+                            if(filesize > 0){
+                                Log.i(LOG_TAG, "Skipping " + filesize + " bytes");
+                                inputStream.skip(filesize);
+                            }*/
+
                             while ((bytesRead = inputStream.read(buffer)) > 0) {
                                 outputStream.write(buffer, 0, bytesRead);
                                 // Send a progress event.
