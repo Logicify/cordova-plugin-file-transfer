@@ -63,6 +63,7 @@ import org.json.JSONObject;
 
 import android.net.Uri;
 import android.os.Build;
+import android.text.TextUtils;
 import android.util.Log;
 import android.webkit.CookieManager;
 
@@ -717,6 +718,7 @@ public class FileTransfer extends CordovaPlugin {
                 boolean cached = false;
                 boolean append = false;
                 long continueFrom = 0;
+                String mimeType = null;
 
                 OutputStream outputStream = null;
                 try {
@@ -801,6 +803,8 @@ public class FileTransfer extends CordovaPlugin {
                         }
                     }
 
+                    mimeType = connection.getHeaderField("Content-Type");
+
                     if (!cached) {
                         try {
                             synchronized (context) {
@@ -814,16 +818,6 @@ public class FileTransfer extends CordovaPlugin {
                             byte[] buffer = new byte[MAX_BUFFER_SIZE];
                             int bytesRead = 0;
                             outputStream = resourceApi.openOutputStream(targetUri, append);
-/*                            long filesize = 0;
-                            if(outputStream instanceof FileOutputStream){
-                                FileOutputStream fs = (FileOutputStream) outputStream;
-                                filesize = fs.getChannel().size();
-                            }
-
-                            if(filesize > 0){
-                                Log.i(LOG_TAG, "Skipping " + filesize + " bytes");
-                                inputStream.skip(filesize);
-                            }*/
 
                             while ((bytesRead = inputStream.read(buffer)) > 0) {
                                 outputStream.write(buffer, 0, bytesRead);
@@ -868,6 +862,10 @@ public class FileTransfer extends CordovaPlugin {
                         if (filePlugin != null) {
                             JSONObject fileEntry = filePlugin.getEntryForFile(file);
                             if (fileEntry != null) {
+                                if(!TextUtils.isEmpty(mimeType)){
+                                    fileEntry.put("mimeType", mimeType);
+                                    Log.i(LOG_TAG, "Mime type - " + mimeType);
+                                }
                                 result = new PluginResult(PluginResult.Status.OK, fileEntry);
                             } else {
                                 JSONObject error = createFileTransferError(CONNECTION_ERR, source, target, connection, null);
