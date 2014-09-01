@@ -83,13 +83,17 @@ public class FileTransfer extends CordovaPlugin {
     private static HashMap<String, RequestContext> activeRequests = new HashMap<String, RequestContext>();
     private static final int MAX_BUFFER_SIZE = 16 * 1024;
 
+    private enum DownloadState{
+        ABORTED, PAUSED, RUNNING
+    }
+
     private static final class RequestContext {
         String source;
         String target;
         File targetFile;
         CallbackContext callbackContext;
         HttpURLConnection connection;
-        boolean aborted;
+        DownloadState aborted = DownloadState.RUNNING;
         RequestContext(String source, String target, CallbackContext callbackContext) {
             this.source = source;
             this.target = target;
@@ -97,10 +101,14 @@ public class FileTransfer extends CordovaPlugin {
         }
         void sendPluginResult(PluginResult pluginResult) {
             synchronized (this) {
-                if (!aborted) {
+                if (aborted == DownloadState.RUNNING) {
                     callbackContext.sendPluginResult(pluginResult);
                 }
             }
+        }
+
+        public boolean isInterrupted(){
+            return aborted != DownloadState.RUNNING;
         }
     }
 
@@ -176,6 +184,7 @@ public class FileTransfer extends CordovaPlugin {
 
     @Override
     public boolean execute(String action, JSONArray args, final CallbackContext callbackContext) throws JSONException {
+        Log.d(LOG_TAG, "execute action: " + action);
         if (action.equals("upload") || action.equals("download")) {
             String source = args.getString(0);
             String target = args.getString(1);
@@ -186,9 +195,9 @@ public class FileTransfer extends CordovaPlugin {
                 download(source, target, args, callbackContext);
             }
             return true;
-        } else if (action.equals("abort")) {
+        } else if (action.equals("abort") || action.equals("pause")) {
             String objectId = args.getString(0);
-            abort(objectId);
+            abort(objectId, action.equals("abort"));
             callbackContext.success();
             return true;
         }
@@ -277,7 +286,7 @@ public class FileTransfer extends CordovaPlugin {
         
         cordova.getThreadPool().execute(new Runnable() {
             public void run() {
-                if (context.aborted) {
+                if (context.isInterrupted()) {
                     return;
                 }
                 HttpURLConnection conn = null;
@@ -387,7 +396,7 @@ public class FileTransfer extends CordovaPlugin {
                     try {
                         sendStream = conn.getOutputStream();
                         synchronized (context) {
-                            if (context.aborted) {
+                            if (context.isInterrupted()) {
                                 return;
                             }
                             context.connection = conn;
@@ -446,7 +455,7 @@ public class FileTransfer extends CordovaPlugin {
                     try {
                         inStream = getInputStream(conn);
                         synchronized (context) {
-                            if (context.aborted) {
+                            if (context.isInterrupted()) {
                                 return;
                             }
                             context.connection = conn;
@@ -706,7 +715,7 @@ public class FileTransfer extends CordovaPlugin {
         
         cordova.getThreadPool().execute(new Runnable() {
             public void run() {
-                if (context.aborted) {
+                if (context.isInterrupted()) {
                     return;
                 }
                 HttpURLConnection connection = null;
@@ -808,7 +817,7 @@ public class FileTransfer extends CordovaPlugin {
                     if (!cached) {
                         try {
                             synchronized (context) {
-                                if (context.aborted) {
+                                if (context.isInterrupted()) {
                                     return;
                                 }
                                 context.connection = connection;
@@ -826,6 +835,21 @@ public class FileTransfer extends CordovaPlugin {
                                 PluginResult progressResult = new PluginResult(PluginResult.Status.OK, progress.toJSONObject());
                                 progressResult.setKeepCallback(true);
                                 context.sendPluginResult(progressResult);
+
+                                if(context.isInterrupted()){
+                                    JSONObject error = createFileTransferError(CONNECTION_ERR, source, target, connection, null);
+                                    Log.e(LOG_TAG, "!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                                    Log.e(LOG_TAG, "Download interrupted!!!!!");
+                                    Log.e(LOG_TAG, "!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                                    result = new PluginResult(PluginResult.Status.IO_EXCEPTION, error);
+
+                                    if (context.connection != null) {
+                                        context.connection.disconnect();
+                                       // context.connection = null;
+                                    }
+
+                                    break;
+                                }
                             }
                         } finally {
                             synchronized (context) {
@@ -911,7 +935,7 @@ public class FileTransfer extends CordovaPlugin {
                         result = new PluginResult(PluginResult.Status.ERROR, createFileTransferError(CONNECTION_ERR, source, target, connection, null));
                     }
                     // Remove incomplete download.
-                    if (!cached && result.getStatus() != PluginResult.Status.OK.ordinal() && file != null) {
+                    if (!cached && result.getStatus() != PluginResult.Status.OK.ordinal() && file != null && context.aborted == DownloadState.ABORTED) {
                         file.delete();
                     }
                     context.sendPluginResult(result);
@@ -920,10 +944,14 @@ public class FileTransfer extends CordovaPlugin {
         });
     }
 
+    private void abort(String objectId) {
+        abort(objectId, true);
+    }
+
     /**
      * Abort an ongoing upload or download.
      */
-    private void abort(String objectId) {
+    private void abort(String objectId, final boolean deleteIncompleteDownload) {
         final RequestContext context;
         synchronized (activeRequests) {
             context = activeRequests.remove(objectId);
@@ -933,16 +961,19 @@ public class FileTransfer extends CordovaPlugin {
             cordova.getThreadPool().execute(new Runnable() {
                 public void run() {
                     synchronized (context) {
-                        File file = context.targetFile;
-                        if (file != null) {
-                            file.delete();
-                        }
+
                         // Trigger the abort callback immediately to minimize latency between it and abort() being called.
                         JSONObject error = createFileTransferError(ABORTED_ERR, context.source, context.target, null, -1, null);
                         context.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, error));
-                        context.aborted = true;
+                        context.aborted = deleteIncompleteDownload ? DownloadState.ABORTED : DownloadState.PAUSED;
+                        Log.d(LOG_TAG, "IsAborted? " + String.valueOf(deleteIncompleteDownload));
                         if (context.connection != null) {
                             context.connection.disconnect();
+                        }
+
+                        File file = context.targetFile;
+                        if (file != null) {
+                            file.delete();
                         }
                     }
                 }
