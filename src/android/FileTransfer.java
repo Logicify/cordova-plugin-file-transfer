@@ -67,6 +67,8 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.webkit.CookieManager;
 
+import com.squareup.okhttp.OkHttpClient;
+
 public class FileTransfer extends CordovaPlugin {
 
     private static final String LOG_TAG = "FileTransfer";
@@ -531,6 +533,7 @@ public class FileTransfer extends CordovaPlugin {
 
     private static TrackingInputStream getInputStream(URLConnection conn) throws IOException {
         String encoding = conn.getContentEncoding();
+        Log.d(LOG_TAG, "Content encoding - " + encoding);
         if (encoding != null && encoding.equalsIgnoreCase("gzip")) {
           return new TrackingGZIPInputStream(new ExposedGZIPInputStream(conn.getInputStream()));
         }
@@ -769,7 +772,7 @@ public class FileTransfer extends CordovaPlugin {
                         {
                             connection.setRequestProperty("cookie", cookie);
                         }
-                        
+
                         // This must be explicitly set for gzip progress tracking to work.
                         connection.setRequestProperty("Accept-Encoding", "gzip");
     
@@ -777,6 +780,9 @@ public class FileTransfer extends CordovaPlugin {
                         if (headers != null) {
                             addHeadersToRequest(connection, headers);
                         }
+
+                        //connection.setRequestProperty("Accept-Encoding", "identity");
+
 
                         //check if local file already exist
 
@@ -972,7 +978,7 @@ public class FileTransfer extends CordovaPlugin {
                         }
 
                         File file = context.targetFile;
-                        if (file != null) {
+                        if (file != null && context.aborted == DownloadState.ABORTED) {
                             file.delete();
                         }
                     }
