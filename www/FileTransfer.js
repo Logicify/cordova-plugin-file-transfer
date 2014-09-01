@@ -207,4 +207,11 @@ FileTransfer.prototype.abort = function() {
     exec(null, null, 'FileTransfer', 'abort', [this._id]);
 };
 
+/**
+ * Pauses currently running download process. The original error callback with ABORTED status will be called.
+ */
+FileTransfer.prototype.pause = function() {
+    exec(null, null, 'FileTransfer', 'pause', [this._id]);
+};
+
 module.exports = FileTransfer;
