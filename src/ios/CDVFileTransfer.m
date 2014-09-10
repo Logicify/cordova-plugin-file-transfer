@@ -360,6 +360,13 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
     }
 }
 
+- (void)pause:(CDVInvokedUrlCommand*)command
+{
+    NSString* objectId = [command.arguments objectAtIndex:0];
+    
+    DLog(@"PAUSED DOWNLOAD.");
+}
+
 - (void)download:(CDVInvokedUrlCommand*)command
 {
     DLog(@"File Transfer downloading file...");
@@ -405,7 +412,7 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
 
     NSMutableURLRequest* req = [NSMutableURLRequest requestWithURL:sourceURL];
     [self applyRequestHeaders:headers toRequest:req];
-
+    
     CDVFileTransferDelegate* delegate = [[CDVFileTransferDelegate alloc] init];
     delegate.command = self;
     delegate.direction = CDV_TRANSFER_DOWNLOAD;
@@ -416,6 +423,14 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
     delegate.targetURL = targetURL;
     delegate.trustAllHosts = trustAllHosts;
     delegate.filePlugin = [self.commandDelegate getCommandInstance:@"File"];
+    
+    UInt32 fileSize = [delegate getTargetFileSize];
+    if (fileSize > 0) {
+        NSDictionary *rangeHeaders = [[NSDictionary alloc] initWithObjectsAndKeys:@"Range",
+                                      [NSString stringWithFormat:@"%d-",(unsigned int)fileSize], nil];
+        [self applyRequestHeaders:rangeHeaders toRequest:req];
+    }
+    
     delegate.backgroundTaskID = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
         [delegate cancelTransfer:delegate.connection];
     }];
@@ -625,6 +640,13 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
         path = [self.target hasPrefix:@"/"] ? [self.target copy] : [(NSURL *)[NSURL URLWithString:self.target] path];
     }
     return path;
+}
+
+- (UInt32) getTargetFileSize
+{
+    NSString *path = [self targetFilePath];
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
+    return [attrs fileSize];
 }
 
 - (void)connection:(NSURLConnection*)connection didReceiveResponse:(NSURLResponse*)response
