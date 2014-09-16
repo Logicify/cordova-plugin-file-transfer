@@ -857,9 +857,7 @@ public class FileTransfer extends CordovaPlugin {
 
                                 if(context.isInterrupted()){
                                     JSONObject error = createFileTransferError(CONNECTION_ERR, source, target, connection, null);
-                                    Log.e(LOG_TAG, "!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-                                    Log.e(LOG_TAG, "Download interrupted!!!!!");
-                                    Log.e(LOG_TAG, "!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                                    Log.d(LOG_TAG, "Download interrupted.");
                                     result = new PluginResult(PluginResult.Status.IO_EXCEPTION, error);
 
                                     if (context.connection != null) {
