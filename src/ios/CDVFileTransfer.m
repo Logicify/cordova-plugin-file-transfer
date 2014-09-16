@@ -360,6 +360,21 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
     }
 }
 
+- (void)pause:(CDVInvokedUrlCommand*)command
+{
+    NSString* objectId = [command.arguments objectAtIndex:0];
+    DLog(@"Paused download");
+    
+    @synchronized (activeTransfers) {
+        CDVFileTransferDelegate* delegate = activeTransfers[objectId];
+        if (delegate != nil) {
+            [delegate cancelTransfer:delegate.connection removeNotNotCompletedFile:false];
+            CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:[self createFileTransferError:CONNECTION_ABORTED AndSource:delegate.source AndTarget:delegate.target]];
+            [self.commandDelegate sendPluginResult:result callbackId:delegate.callbackId];
+        }
+    }
+}
+
 - (void)download:(CDVInvokedUrlCommand*)command
 {
     DLog(@"File Transfer downloading file...");
@@ -405,7 +420,7 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
 
     NSMutableURLRequest* req = [NSMutableURLRequest requestWithURL:sourceURL];
     [self applyRequestHeaders:headers toRequest:req];
-
+    
     CDVFileTransferDelegate* delegate = [[CDVFileTransferDelegate alloc] init];
     delegate.command = self;
     delegate.direction = CDV_TRANSFER_DOWNLOAD;
@@ -416,6 +431,13 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
     delegate.targetURL = targetURL;
     delegate.trustAllHosts = trustAllHosts;
     delegate.filePlugin = [self.commandDelegate getCommandInstance:@"File"];
+    
+    UInt32 fileSize = [delegate getTargetFileSize];
+    if (fileSize > 0) {
+        NSDictionary *rangeHeaders = [[NSDictionary alloc] initWithObjectsAndKeys:                                  [NSString stringWithFormat:@"%d-",(unsigned int)fileSize], @"Range", nil];
+        [self applyRequestHeaders:rangeHeaders toRequest:req];
+    }
+    DLog([req headers]);
     delegate.backgroundTaskID = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
         [delegate cancelTransfer:delegate.connection];
     }];
@@ -564,8 +586,11 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
             [self.targetFileHandle closeFile];
             self.targetFileHandle = nil;
             DLog(@"File Transfer Download success");
-
-            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[self.filePlugin makeEntryForURL:self.targetURL]];
+            
+            NSMutableDictionary *resultData = [NSMutableDictionary dictionaryWithCapacity:20];
+            [resultData addEntriesFromDictionary: [self.filePlugin makeEntryForURL:self.targetURL]];
+            [resultData setObject:self.mimeType forKey:@"mimeType"];
+            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:resultData];
         } else {
             downloadResponse = [[NSString alloc] initWithData:self.responseData encoding:NSUTF8StringEncoding];
             result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:[command createFileTransferError:CONNECTION_ERR AndSource:source AndTarget:target AndHttpStatus:self.responseCode AndBody:downloadResponse]];
@@ -592,6 +617,12 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
 
 - (void)cancelTransfer:(NSURLConnection*)connection
 {
+    [self cancelTransfer:connection removeNotNotCompletedFile:true];
+}
+
+- (void)cancelTransfer:(NSURLConnection*)connection
+                        removeNotNotCompletedFile:(bool)removeNotNotCompletedFile
+{
     [connection cancel];
     @synchronized (self.command.activeTransfers) {
         CDVFileTransferDelegate* delegate = self.command.activeTransfers[self.objectId];
@@ -599,8 +630,9 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
         [[UIApplication sharedApplication] endBackgroundTask:delegate.backgroundTaskID];
         delegate.backgroundTaskID = UIBackgroundTaskInvalid;
     }
-
-    [self removeTargetFile];
+    if (removeNotNotCompletedFile) {
+        [self removeTargetFile];
+    }
 }
 
 - (void)cancelTransferWithError:(NSURLConnection*)connection errorMessage:(NSString*)errorMessage
@@ -625,6 +657,13 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
         path = [self.target hasPrefix:@"/"] ? [self.target copy] : [(NSURL *)[NSURL URLWithString:self.target] path];
     }
     return path;
+}
+
+- (UInt32) getTargetFileSize
+{
+    NSString *path = [self targetFilePath];
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
+    return [attrs fileSize];
 }
 
 - (void)connection:(NSURLConnection*)connection didReceiveResponse:(NSURLResponse*)response
@@ -675,10 +714,15 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
             }
             return;
         }
-        // create target file
-        if ([[NSFileManager defaultManager] createFileAtPath:filePath contents:nil attributes:nil] == NO) {
-            [self cancelTransferWithError:connection errorMessage:@"Could not create target file"];
-            return;
+        
+        // If file doesn't exist - we need to create one
+        if (![[NSFileManager defaultManager] fileExistsAtPath:filePath isDirectory:false])
+        {
+            // create target file
+            if ([[NSFileManager defaultManager] createFileAtPath:filePath contents:nil attributes:nil] == NO) {
+                [self cancelTransferWithError:connection errorMessage:@"Could not create target file"];
+                return;
+            }
         }
         // open target file for writing
         self.targetFileHandle = [NSFileHandle fileHandleForWritingAtPath:filePath];

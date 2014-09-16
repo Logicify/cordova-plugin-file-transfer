@@ -32,12 +32,14 @@ namespace WPCordovaClassLib.Cordova.Commands
             public HttpWebRequest request;
             public TransferOptions options;
             public bool isCancelled;
+            public bool isPaused;
 
             public DownloadRequestState()
             {
                 request = null;
                 options = null;
                 isCancelled = false;
+                isPaused= false;
             }
         }
 
@@ -84,7 +86,7 @@ namespace WPCordovaClassLib.Cordova.Commands
         public const int ConnectionError = 3;
         public const int AbortError = 4; // not really an error, but whatevs
 
-        private static Dictionary<string, DownloadRequestState> InProcDownloads = new Dictionary<string,DownloadRequestState>();
+        private static Dictionary<string, DownloadRequestState> InProcDownloads = new Dictionary<string, DownloadRequestState>();
 
         /// <summary>
         /// Uploading response info
@@ -246,7 +248,7 @@ namespace WPCordovaClassLib.Cordova.Commands
                     uploadOptions.Params = args[5];
 
                     bool trustAll = false;
-                    bool.TryParse(args[6],out trustAll);
+                    bool.TryParse(args[6], out trustAll);
                     uploadOptions.TrustAllHosts = trustAll;
 
                     bool doChunked = false;
@@ -302,12 +304,12 @@ namespace WPCordovaClassLib.Cordova.Commands
             }
             catch (Exception /*ex*/)
             {
-                DispatchCommandResult(new PluginResult(PluginResult.Status.ERROR, new FileTransferError(ConnectionError)),callbackId);
+                DispatchCommandResult(new PluginResult(PluginResult.Status.ERROR, new FileTransferError(ConnectionError)), callbackId);
             }
         }
 
         // example : "{\"Authorization\":\"Basic Y29yZG92YV91c2VyOmNvcmRvdmFfcGFzc3dvcmQ=\"}"
-        protected Dictionary<string,string> parseHeaders(string jsonHeaders)
+        protected Dictionary<string, string> parseHeaders(string jsonHeaders)
         {
             try
             {
@@ -357,7 +359,7 @@ namespace WPCordovaClassLib.Cordova.Commands
                 downloadOptions.FilePath = optionStrings[1];
 
                 bool trustAll = false;
-                bool.TryParse(optionStrings[2],out trustAll);
+                bool.TryParse(optionStrings[2], out trustAll);
                 downloadOptions.TrustAllHosts = trustAll;
 
                 downloadOptions.Id = optionStrings[3];
@@ -468,6 +470,7 @@ namespace WPCordovaClassLib.Cordova.Commands
                 return;
             }
 
+            //web file download
             if (downloadOptions != null && webRequest != null)
             {
                 DownloadRequestState state = new DownloadRequestState();
@@ -482,6 +485,24 @@ namespace WPCordovaClassLib.Cordova.Commands
                     {
                         webRequest.Headers[key] = headers[key];
                     }
+                }
+
+                string filePath = downloadOptions.FilePath.Replace("file://", "");
+                long size = 0;
+
+                using (IsolatedStorageFile isoFile = IsolatedStorageFile.GetUserStoreForApplication())
+                {
+                    if(isoFile.FileExists(filePath))
+                    {
+                        var dest = isoFile.OpenFile(filePath, FileMode.Open);
+                        size = dest.Length;
+                    }
+                }
+
+                if(size > 0)
+                {
+                    webRequest.Headers["Range"] = "bytes=" + size + "-";
+                    Debug.WriteLine("file psize not 0, continue from " + size);
                 }
 
                 try
@@ -506,7 +527,19 @@ namespace WPCordovaClassLib.Cordova.Commands
             }
         }
 
+        public void pause(string options)
+        {
+            Debug.WriteLine("Pause :: " + options);
+            abort(options, false);
+
+        }
+
         public void abort(string options)
+        {
+            abort(options, true);
+        }
+
+        public void abort(string options, bool deleteIncompleteDownload)
         {
             Debug.WriteLine("Abort :: " + options);
             string[] optionStrings = JSON.JsonHelper.Deserialize<string[]>(options);
@@ -519,6 +552,7 @@ namespace WPCordovaClassLib.Cordova.Commands
                 if (!state.isCancelled)
                 { // prevent multiple callbacks for the same abort
                     state.isCancelled = true;
+                    state.isPaused = !deleteIncompleteDownload;
                     if (!state.request.HaveResponse)
                     {
                         state.request.Abort();
@@ -549,6 +583,20 @@ namespace WPCordovaClassLib.Cordova.Commands
             DispatchCommandResult(plugRes, callbackId);
         }
 
+        [DataContract]
+        private class ExtendedFileEntry : File.FileEntry
+        {
+
+            [DataMember(Name = "mimeType")]
+            public string MimeType { get; set; }
+
+            public ExtendedFileEntry(string filePath): base(filePath)
+            {
+                
+            }
+
+        }
+
         /// <summary>
         ///
         /// </summary>
@@ -559,6 +607,9 @@ namespace WPCordovaClassLib.Cordova.Commands
             HttpWebRequest request = reqState.request;
 
             string callbackId = reqState.options.CallbackId;
+            string filePath = reqState.options.FilePath.Replace("file://", "");
+            string mimeType = null;
+
             try
             {
                 HttpWebResponse response = (HttpWebResponse)request.EndGetResponse(asynchronousResult);
@@ -569,20 +620,27 @@ namespace WPCordovaClassLib.Cordova.Commands
                 using (IsolatedStorageFile isoFile = IsolatedStorageFile.GetUserStoreForApplication())
                 {
                     // create any directories in the path that do not exist
-                    string directoryName = getDirectoryName(reqState.options.FilePath);
+                    string directoryName = getDirectoryName(filePath);
                     if (!string.IsNullOrEmpty(directoryName) && !isoFile.DirectoryExists(directoryName))
                     {
                         isoFile.CreateDirectory(directoryName);
                     }
 
+                    bool fileExist = false;
+                    mimeType = response.Headers["Content-Type"];
+
                     // create the file if not exists
-                    if (!isoFile.FileExists(reqState.options.FilePath))
+                    if (!isoFile.FileExists(filePath))
                     {
-                        var file = isoFile.CreateFile(reqState.options.FilePath);
+                        var file = isoFile.CreateFile(filePath);
                         file.Close();
                     }
+                    else
+                    {
+                        fileExist = true;
+                    }
 
-                    using (FileStream fileStream = new IsolatedStorageFileStream(reqState.options.FilePath, FileMode.Open, FileAccess.Write, isoFile))
+                    using (FileStream fileStream = new IsolatedStorageFileStream(filePath, fileExist ? FileMode.Append : FileMode.Open, FileAccess.Write, isoFile))
                     {
                         long totalBytes = response.ContentLength;
                         int bytesRead = 0;
@@ -615,9 +673,15 @@ namespace WPCordovaClassLib.Cordova.Commands
                             }
                         }
                     }
-                    if (reqState.isCancelled)
+
+                    //delete if cancelled. Do not delete if paused
+                    if (reqState.isCancelled && !reqState.isPaused)
                     {
-                        isoFile.DeleteFile(reqState.options.FilePath);
+                        Debug.WriteLine("Download aborted, deleting file");
+                        isoFile.DeleteFile(filePath);
+                    } else
+                    {
+                        Debug.WriteLine("Download paused or finished, keeping file");
                     }
                 }
 
@@ -628,7 +692,12 @@ namespace WPCordovaClassLib.Cordova.Commands
                 }
                 else
                 {
-                    File.FileEntry entry = new File.FileEntry(reqState.options.FilePath);
+                    //File.FileEntry entry = new File.FileEntry(filePath);
+                    ExtendedFileEntry entry = new ExtendedFileEntry(filePath);
+                    if(!string.IsNullOrEmpty(mimeType))
+                    {
+                        entry.MimeType = mimeType;
+                    }
                     DispatchCommandResult(new PluginResult(PluginResult.Status.OK, entry), callbackId);
                 }
             }
