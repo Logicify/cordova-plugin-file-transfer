@@ -833,14 +833,27 @@ public class FileTransfer extends CordovaPlugin {
                             byte[] buffer = new byte[MAX_BUFFER_SIZE];
                             int bytesRead = 0;
                             outputStream = resourceApi.openOutputStream(targetUri, append);
+                            progress.setLoaded(continueFrom);
+
+                            int oldPercent = 0;
+                            int newPercent = 0;
+                            long onePercent = progress.getTotal() / 100;
 
                             while ((bytesRead = inputStream.read(buffer)) > 0) {
                                 outputStream.write(buffer, 0, bytesRead);
                                 // Send a progress event.
-                                progress.setLoaded(inputStream.getTotalRawBytesRead());
-                                PluginResult progressResult = new PluginResult(PluginResult.Status.OK, progress.toJSONObject());
-                                progressResult.setKeepCallback(true);
-                                context.sendPluginResult(progressResult);
+                                progress.setLoaded(continueFrom + inputStream.getTotalRawBytesRead());
+
+                                newPercent = (int)(progress.getLoaded() / onePercent);
+
+                                if(newPercent > oldPercent){
+                                    Log.d(LOG_TAG, "Sending update for download: " + newPercent + "%");
+                                    PluginResult progressResult = new PluginResult(PluginResult.Status.OK, progress.toJSONObject());
+                                    progressResult.setKeepCallback(true);
+                                    context.sendPluginResult(progressResult);
+                                    oldPercent = newPercent;
+                                }
+
 
                                 if(context.isInterrupted()){
                                     JSONObject error = createFileTransferError(CONNECTION_ERR, source, target, connection, null);
