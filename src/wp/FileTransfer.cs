@@ -461,6 +461,8 @@ namespace WPCordovaClassLib.Cordova.Commands
                     // otherwise it is web-bound, we will actually download it
                     //Debug.WriteLine("Creating WebRequest for url : " + downloadOptions.Url);
                     webRequest = (HttpWebRequest)WebRequest.Create(downloadOptions.Url);
+                    webRequest.AllowReadStreamBuffering = false;
+                    webRequest.AllowWriteStreamBuffering = false;
                 }
             }
             catch (Exception /*ex*/)
@@ -494,8 +496,9 @@ namespace WPCordovaClassLib.Cordova.Commands
                 {
                     if(isoFile.FileExists(filePath))
                     {
-                        var dest = isoFile.OpenFile(filePath, FileMode.Open);
+                        var dest = isoFile.OpenFile(filePath, FileMode.Open, FileAccess.Read);
                         size = dest.Length;
+                        dest.Close();
                     }
                 }
 
@@ -609,6 +612,7 @@ namespace WPCordovaClassLib.Cordova.Commands
             string callbackId = reqState.options.CallbackId;
             string filePath = reqState.options.FilePath.Replace("file://", "");
             string mimeType = null;
+            long size = 0;
 
             try
             {
@@ -638,17 +642,28 @@ namespace WPCordovaClassLib.Cordova.Commands
                     else
                     {
                         fileExist = true;
+                        var dest = isoFile.OpenFile(filePath, FileMode.Open, FileAccess.Read);
+                        size = dest.Length;
+                        dest.Close();
+
                     }
 
                     using (FileStream fileStream = new IsolatedStorageFileStream(filePath, fileExist ? FileMode.Append : FileMode.Open, FileAccess.Write, isoFile))
                     {
                         long totalBytes = response.ContentLength;
-                        int bytesRead = 0;
+                        long bytesRead = size;
+
+                        int onePercent = (int)(totalBytes / 100);
+                        int oldPercent = 0;
+                        int newPercent = 0;
+
+                        Debug.WriteLine("DOWNLOAD: Starting download from " + size);
+
                         using (BinaryReader reader = new BinaryReader(response.GetResponseStream()))
                         {
                             using (BinaryWriter writer = new BinaryWriter(fileStream))
                             {
-                                int BUFFER_SIZE = 1024;
+                                int BUFFER_SIZE = 1024 * 16;
                                 byte[] buffer;
 
                                 while (true)
@@ -659,7 +674,14 @@ namespace WPCordovaClassLib.Cordova.Commands
                                     if (buffer.Length > 0 && !reqState.isCancelled)
                                     {
                                         writer.Write(buffer);
-                                        DispatchFileTransferProgress(bytesRead, totalBytes, callbackId);
+                                        newPercent = (int)(bytesRead / onePercent);
+                                        if (newPercent > oldPercent)
+                                        {
+                                            DispatchFileTransferProgress(bytesRead, totalBytes, callbackId);
+                                            oldPercent = newPercent;
+                                            Debug.WriteLine("PROGRESS: " + newPercent + "%");
+                                        }
+                                        
                                     }
                                     else
                                     {
