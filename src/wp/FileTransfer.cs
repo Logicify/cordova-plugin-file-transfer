@@ -650,7 +650,7 @@ namespace WPCordovaClassLib.Cordova.Commands
 
                     using (FileStream fileStream = new IsolatedStorageFileStream(filePath, fileExist ? FileMode.Append : FileMode.Open, FileAccess.Write, isoFile))
                     {
-                        long totalBytes = response.ContentLength;
+                        long totalBytes = size + response.ContentLength;
                         long bytesRead = size;
 
                         int onePercent = (int)(totalBytes / 100);
