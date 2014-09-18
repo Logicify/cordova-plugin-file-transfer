@@ -791,7 +791,7 @@ public class FileTransfer extends CordovaPlugin {
                             if(localFile.exists() && localFile.length() > 0){
                                 continueFrom = localFile.length();
                                 append = true;
-                                connection.addRequestProperty("Range", "bytes=" + String.valueOf(continueFrom) + "-");
+                                connection.setRequestProperty("Range", "bytes=" + String.valueOf(continueFrom) + "-");
                                 Log.d(LOG_TAG, "Local file found, continue from " + String.valueOf(continueFrom));
                             } else {
                                 Log.d(LOG_TAG, "Local file not found, proceeding as usual");
@@ -811,7 +811,7 @@ public class FileTransfer extends CordovaPlugin {
                                 // the encoding -- identity or gzip
                                 if (connection.getContentLength() != -1) {
                                     progress.setLengthComputable(true);
-                                    progress.setTotal(connection.getContentLength());
+                                    progress.setTotal(continueFrom + connection.getContentLength());
                                 }
                             }
                             inputStream = getInputStream(connection);
