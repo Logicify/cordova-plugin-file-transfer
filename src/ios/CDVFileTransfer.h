@@ -85,5 +85,8 @@ extern NSString* const kOptionsKeyCookie;
 @property (strong) NSFileHandle* targetFileHandle;
 @property (nonatomic, strong) CDVFileTransferEntityLengthRequest* entityLengthRequest;
 @property (nonatomic, strong) CDVFile *filePlugin;
+@property (nonatomic, assign) long long oldPercent;
+@property (nonatomic, assign) long long newPercent;
+@property (nonatomic, assign) long long loadedSize;
 
 @end

@@ -431,11 +431,12 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
     delegate.targetURL = targetURL;
     delegate.trustAllHosts = trustAllHosts;
     delegate.filePlugin = [self.commandDelegate getCommandInstance:@"File"];
-    
+    delegate.loadedSize = 0;
     UInt32 fileSize = [delegate getTargetFileSize];
     if (fileSize > 0) {
-        NSDictionary *rangeHeaders = [[NSDictionary alloc] initWithObjectsAndKeys:                                  [NSString stringWithFormat:@"%d-",(unsigned int)fileSize], @"Range", nil];
+        NSDictionary *rangeHeaders = [[NSDictionary alloc] initWithObjectsAndKeys:[NSString stringWithFormat:@"%d-",(unsigned int)fileSize], @"Range", nil];
         [self applyRequestHeaders:rangeHeaders toRequest:req];
+         delegate.loadedSize = fileSize;
     }
     DLog([req headers]);
     delegate.backgroundTaskID = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
@@ -443,7 +444,7 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
     }];
 
     delegate.connection = [[NSURLConnection alloc] initWithRequest:req delegate:delegate startImmediately:NO];
-
+    
     if (self.queue == nil) {
         self.queue = [[NSOperationQueue alloc] init];
     }
@@ -553,7 +554,7 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
 
 @implementation CDVFileTransferDelegate
 
-@synthesize callbackId, connection = _connection, source, target, responseData, responseHeaders, command, bytesTransfered, bytesExpected, direction, responseCode, objectId, targetFileHandle, filePlugin;
+@synthesize callbackId, connection = _connection, source, target, responseData, responseHeaders, command, bytesTransfered, bytesExpected, direction, responseCode, objectId, targetFileHandle, filePlugin, oldPercent, newPercent, loadedSize;
 
 - (void)connectionDidFinishLoading:(NSURLConnection*)connection
 {
@@ -771,13 +772,24 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
         if (!lengthComputable && (self.entityLengthRequest != nil)) {
             return;
         }
-        NSMutableDictionary* downloadProgress = [NSMutableDictionary dictionaryWithCapacity:3];
-        [downloadProgress setObject:[NSNumber numberWithBool:lengthComputable] forKey:@"lengthComputable"];
-        [downloadProgress setObject:[NSNumber numberWithLongLong:self.bytesTransfered] forKey:@"loaded"];
-        [downloadProgress setObject:[NSNumber numberWithLongLong:self.bytesExpected] forKey:@"total"];
-        CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:downloadProgress];
-        [result setKeepCallbackAsBool:true];
-        [self.command.commandDelegate sendPluginResult:result callbackId:callbackId];
+        
+        long long onePercent = (self.bytesExpected + self.loadedSize) / 100;
+        
+        self.newPercent = (self.bytesTransfered + self.loadedSize) / onePercent;
+        
+        if(self.newPercent > self.oldPercent){
+            NSMutableDictionary* downloadProgress = [NSMutableDictionary dictionaryWithCapacity:3];
+            [downloadProgress setObject:[NSNumber numberWithBool:lengthComputable] forKey:@"lengthComputable"];
+            [downloadProgress setObject:[NSNumber numberWithLongLong:self.bytesTransfered] forKey:@"loaded"];
+            [downloadProgress setObject:[NSNumber numberWithLongLong:self.bytesExpected] forKey:@"total"];
+            CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:downloadProgress];
+            [result setKeepCallbackAsBool:true];
+            [self.command.commandDelegate sendPluginResult:result callbackId:callbackId];
+            self.oldPercent = self.newPercent;
+        }
+        
+        
+
     }
 }
 
