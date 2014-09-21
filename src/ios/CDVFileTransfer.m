@@ -773,17 +773,18 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
             return;
         }
         
-        long long onePercent = (self.bytesExpected + self.loadedSize) / 100;
+        long long onePercent = (self.bytesExpected + self.loadedSize) / 100l;
         
         self.newPercent = (self.bytesTransfered + self.loadedSize) / onePercent;
         
         if(self.newPercent > self.oldPercent){
             NSMutableDictionary* downloadProgress = [NSMutableDictionary dictionaryWithCapacity:3];
             [downloadProgress setObject:[NSNumber numberWithBool:lengthComputable] forKey:@"lengthComputable"];
-            [downloadProgress setObject:[NSNumber numberWithLongLong:self.bytesTransfered] forKey:@"loaded"];
-            [downloadProgress setObject:[NSNumber numberWithLongLong:self.bytesExpected] forKey:@"total"];
+            [downloadProgress setObject:[NSNumber numberWithLongLong:(self.bytesTransfered + self.loadedSize)] forKey:@"loaded"];
+            [downloadProgress setObject:[NSNumber numberWithLongLong:(self.bytesExpected + self.loadedSize)] forKey:@"total"];
             CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:downloadProgress];
             [result setKeepCallbackAsBool:true];
+            DLog(@"Updating percent to %lld", self.newPercent);
             [self.command.commandDelegate sendPluginResult:result callbackId:callbackId];
             self.oldPercent = self.newPercent;
         }
