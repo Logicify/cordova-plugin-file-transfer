@@ -64,7 +64,7 @@ extern NSString* const kOptionsKeyCookie;
 - (void)updateBytesExpected:(long long)newBytesExpected;
 - (void)cancelTransfer:(NSURLConnection*)connection;
 - (void)cancelTransfer:(NSURLConnection*)connection removeNotNotCompletedFile:(bool)removeNotNotCompletedFile;
-- (UInt32)getTargetFileSize;
+- (unsigned long long)getTargetFileSize;
 
 @property (strong) NSMutableData* responseData; // atomic
 @property (nonatomic, strong) NSDictionary* responseHeaders;

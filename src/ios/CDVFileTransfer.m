@@ -432,9 +432,9 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
     delegate.trustAllHosts = trustAllHosts;
     delegate.filePlugin = [self.commandDelegate getCommandInstance:@"File"];
     delegate.loadedSize = 0;
-    UInt32 fileSize = [delegate getTargetFileSize];
+    unsigned long long fileSize = [delegate getTargetFileSize];
     if (fileSize > 0) {
-        NSDictionary *rangeHeaders = [[NSDictionary alloc] initWithObjectsAndKeys:[NSString stringWithFormat:@"%d-",(unsigned int)fileSize], @"Range", nil];
+        NSDictionary *rangeHeaders = [[NSDictionary alloc] initWithObjectsAndKeys:[NSString stringWithFormat:@"bytes=%lld-", fileSize], @"Range", nil];
         [self applyRequestHeaders:rangeHeaders toRequest:req];
          delegate.loadedSize = fileSize;
     }
@@ -660,7 +660,7 @@ static CFIndex WriteDataToStream(NSData* data, CFWriteStreamRef stream)
     return path;
 }
 
-- (UInt32) getTargetFileSize
+- (unsigned long long) getTargetFileSize
 {
     NSString *path = [self targetFilePath];
     NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
