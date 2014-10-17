@@ -81,6 +81,8 @@ public class FileTransfer extends CordovaPlugin {
     public static int CONNECTION_ERR = 3;
     public static int ABORTED_ERR = 4;
     public static int NOT_MODIFIED_ERR = 5;
+    public static int HTTP_ERR = 6;
+
 
     private static HashMap<String, RequestContext> activeRequests = new HashMap<String, RequestContext>();
     private static final int MAX_BUFFER_SIZE = 16 * 1024;
@@ -731,6 +733,7 @@ public class FileTransfer extends CordovaPlugin {
                 boolean append = false;
                 long continueFrom = 0;
                 String mimeType = null;
+                boolean canProceed = true;
 
                 OutputStream outputStream = null;
                 try {
@@ -799,28 +802,40 @@ public class FileTransfer extends CordovaPlugin {
                         }
         
                         connection.connect();
-                        if (connection.getResponseCode() == HttpURLConnection.HTTP_NOT_MODIFIED) {
-                            cached = true;
-                            connection.disconnect();
-                            Log.d(LOG_TAG, "Resource not modified: " + source);
-                            JSONObject error = createFileTransferError(NOT_MODIFIED_ERR, source, target, connection, null);
-                            result = new PluginResult(PluginResult.Status.ERROR, error);
+
+                        int responseCode = connection.getResponseCode();
+
+
+                        if(responseCode < HttpURLConnection.HTTP_OK || responseCode > HttpURLConnection.HTTP_NOT_MODIFIED){
+                                JSONObject error = createFileTransferError(HTTP_ERR, source, target, connection, null);
+                                result = new PluginResult(PluginResult.Status.ERROR, error);
+                            canProceed = false;
                         } else {
-                            if (connection.getContentEncoding() == null || connection.getContentEncoding().equalsIgnoreCase("gzip")) {
-                                // Only trust content-length header if we understand
-                                // the encoding -- identity or gzip
-                                if (connection.getContentLength() != -1) {
-                                    progress.setLengthComputable(true);
-                                    progress.setTotal(continueFrom + connection.getContentLength());
+                            Log.d(LOG_TAG, "Response code: " + responseCode);
+
+                            if (connection.getResponseCode() == HttpURLConnection.HTTP_NOT_MODIFIED) {
+                                cached = true;
+                                connection.disconnect();
+                                Log.d(LOG_TAG, "Resource not modified: " + source);
+                                JSONObject error = createFileTransferError(NOT_MODIFIED_ERR, source, target, connection, null);
+                                result = new PluginResult(PluginResult.Status.ERROR, error);
+                            } else {
+                                if (connection.getContentEncoding() == null || connection.getContentEncoding().equalsIgnoreCase("gzip")) {
+                                    // Only trust content-length header if we understand
+                                    // the encoding -- identity or gzip
+                                    if (connection.getContentLength() != -1) {
+                                        progress.setLengthComputable(true);
+                                        progress.setTotal(continueFrom + connection.getContentLength());
+                                    }
                                 }
+                                inputStream = getInputStream(connection);
                             }
-                            inputStream = getInputStream(connection);
                         }
                     }
 
                     mimeType = connection.getHeaderField("Content-Type");
 
-                    if (!cached) {
+                    if (!cached && canProceed) {
                         try {
                             synchronized (context) {
                                 if (context.isInterrupted()) {
